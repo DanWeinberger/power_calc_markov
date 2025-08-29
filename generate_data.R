@@ -1,4 +1,5 @@
 ##This code generates data using a 2 state discrete-time Markov model
+#We treat each year independently--this is for simplicity, otherwise need to move from R->S in season 2
 
 library(lubridate)
 library(msm)
@@ -7,10 +8,11 @@ library(pbapply)
 # Constants
 set.seed(123)
 
-n_individuals <- 120 #40 people per ward, on 3 wards (must be a multiple of 3!)
-n_weeks <- 104 #2 year
+nsim=500
+n_individuals <- 240 #40 people per ward, on 3 wards (must be a multiple of 3!), in 2 years (each year considered independent)
+n_weeks <- 52 #2 year (but just deal with 1 year of time because )
 n_days <- n_weeks * 7
-p_infect_community_base <- 0.0005  # Baseline community infection rate--yields ~23% of people getting infected using the seasonal parameters below
+p_infect_community_base <- 0.00075  # Baseline community infection rate--yields ~23% of people getting infected using the seasonal parameters below
 ward_epidemic_multiplier <- 2
 ward_epidemics <- list(c(100,145),
                        c(500,545)) #when are there epidemics on the wward?
@@ -113,7 +115,7 @@ fit_data <- function(X){
 }
 
 #Generate 500 simulations
-sims <- pbreplicate(500,gen_data(), simplify = F)
+sims <- pbreplicate(nsim,gen_data(), simplify = F)
 
 #extract results
 all_estimates <- t(pblapply(sims,fit_data))
@@ -128,7 +130,8 @@ mean(covar_estimates[,'HR'])
 #Power
 mean(covar_estimates[,'L']>1)
 
-mean(covar_estimates[,'L']<1.5 & covar_estimates[,'U']>1.5)
+
+mean(covar_estimates[,'L']<ward_epidemic_multiplier & covar_estimates[,'U']>ward_epidemic_multiplier)
 
 
 prev <- lapply(1:length(sims), function(x){ 
@@ -138,9 +141,15 @@ prev <- lapply(1:length(sims), function(x){
 }
   ) %>%
   bind_rows() %>%
-  group_by(sim,individual) %>%
-  mutate(pos = if_else(max(state==2)==1, 1,0 )) %>%
+  mutate(season = if_else(day<=365,1,2)
+         ) %>%
+  group_by(sim,season,individual) %>%
+  mutate(pos = if_else(max(state==2)==1, 1,0 )
+         ) %>%
   summarize(pos=max(pos)) %>%
   ungroup() %>%
-  group_by(sim) %>%
+  group_by(sim,season) %>%
   summarize(prev=mean(pos))
+
+hist(prev$prev)
+quantile(prev$prev, probs=c(0.5, 0.25, 0.75))
