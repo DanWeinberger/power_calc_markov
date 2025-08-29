@@ -15,7 +15,7 @@ n_days <- n_weeks * 7
 p_infect_community_base <- 0.00075  # Baseline community infection rate--yields ~23% of people getting infected using the seasonal parameters below
 ward_epidemic_multiplier <- 2
 ward_epidemics <- list(c(100,145),
-                       c(500,545)) #when are there epidemics on the wward?
+                       c(250,295)) #when are there epidemics on the wward?
 
 #For influenza, assume 23% of HCW infected during season: https://pmc.ncbi.nlm.nih.gov/articles/PMC2352563/
 
@@ -129,6 +129,9 @@ mean(covar_estimates[,'HR'])
 
 #Power
 mean(covar_estimates[,'L']>1)
+
+#width of CI
+mean(covar_estimates[,'U'] - covar_estimates[,'L'])
 
 
 mean(covar_estimates[,'L']<ward_epidemic_multiplier & covar_estimates[,'U']>ward_epidemic_multiplier)
