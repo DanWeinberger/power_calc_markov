@@ -24,9 +24,9 @@ community_infection_rate <- function(day, id) {
   if(
      (day>ward_epidemics[[1]][1] & day<ward_epidemics[[1]][2])|(day>ward_epidemics[[2]][1] & day<ward_epidemics[[2]][2])
     ){
-    ward_epidemic_multiplier * p_infect_community_base * (1 + 0.5 * sin(2 * pi * (day / 365)))
+    ward_epidemic_multiplier * p_infect_community_base * exp( 0.5 * sin(2 * pi * (day / 365)))
   }else{
-    p_infect_community_base * (1 + 0.5 * sin(2 * pi * (day / 365)))
+    p_infect_community_base * exp( 0.5 * sin(2 * pi * (day / 365)))
     
   }
 }
