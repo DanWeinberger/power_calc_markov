@@ -1,27 +1,45 @@
 library(lubridate)
 library(msm)
 library(tidyverse)
-
+library(pbapply)
 # Constants
 set.seed(123)
 
-n_individuals <- 100
-n_weeks <- 52
+n_individuals <- 120 #40 people per ward, on 3 wards (must be a multiple of 3!)
+n_weeks <- 104 #2 year
 n_days <- n_weeks * 7
-p_infect_community_base <- 0.001  # Baseline example community infection rate
+p_infect_community_base <- 0.001  # Baseline community infection rate--yields ~23% of people getting infected using the seasonal parameters below
+ward_epidemic_multiplier <- 1.5
+ward_epidemics <- list(c(100,145),
+                       c(500,545)) #when are there epidemics on the wward?
+
+#For influenza, assume 23% of HCW infected during season: https://pmc.ncbi.nlm.nih.gov/articles/PMC2352563/
 
 # Seasonal variation in community infection rates (sinusoidal)
-community_infection_rate <- function(day) {
-  p_infect_community_base * (1 + 0.5 * sin(2 * pi * (day / 365)))
+community_infection_rate <- function(day, id) {
+  if(
+     (day>ward_epidemics[[1]][1] & day<ward_epidemics[[1]][2])|(day>ward_epidemics[[2]][1] & day<ward_epidemics[[2]][2])|
+    ward_individual_mapping[id,2] ==2 & day>100 & day<130
+    ){
+    ward_epidemic_multiplier * p_infect_community_base * (1 + 0.5 * sin(2 * pi * (day / 365)))
+  }else{
+    p_infect_community_base * (1 + 0.5 * sin(2 * pi * (day / 365)))
+    
+  }
 }
 
 # Mean duration of being infected
 mean_duration_infected <- 14
 
+ward_individual_mapping <- cbind.data.frame(
+  individual=1:n_individuals,
+  ward = rep(1:3, each=n_individuals/3)
+)
+
 simulate_transitions <- function(states, community_infection_rate, mean_duration_infected, n_days) {
   for (day in 2:n_days) {
-    community_rate <- community_infection_rate(day)
-    for (i in 1:nrow(states)) {
+    for (i in 1:n_individuals) {
+      community_rate <- community_infection_rate(day,i)
       current_state <- states[i, day - 1]
       if (current_state == 1) {  # S
         new_state <- ifelse(rbinom(1, 1, community_rate) == 1, 2, 1)  # Move to I or stay in S
@@ -36,46 +54,68 @@ simulate_transitions <- function(states, community_infection_rate, mean_duration
   return(states)
 }
 
-# Initialize states: 1 = S, 2 = I, 3 = R
-states <- matrix(1, nrow = n_individuals, ncol = n_days)
-states <- simulate_transitions(states, community_infection_rate, mean_duration_infected, n_days)
+gen_data <- function(){
+    # Initialize states: 1 = S, 2 = I, 3 = R
+    states <- matrix(1, nrow = n_individuals, ncol = n_days)
+    states <- simulate_transitions(states, community_infection_rate, mean_duration_infected, n_days)
+    
+    # Convert to weekly observations
+    sample_days <- seq(1, n_days, by = 7)
+    weekly_states <- states[, seq(1, n_days, by = 7)]
+    
+    
+    # Convert data to long format for model fitting
+    simulation_data <- data.frame(
+      individual = rep(1:n_individuals, times = n_weeks),
+      day = rep(sample_days, each = n_individuals),
+      state = as.vector(weekly_states)
+    ) %>%
+      left_join(ward_individual_mapping, by='individual') %>%
+      arrange(individual, day) %>%
+      group_by(individual) %>%
+      filter(!(state == lag(state, default = first(state)) & state==3  )) %>% #censor if R
+      ungroup() %>%
+      mutate(
+             ward_epidemic = if_else(
+               (day>ward_epidemics[[1]][1] & day<ward_epidemics[[1]][2])|(day>ward_epidemics[[2]][1] & day<ward_epidemics[[2]][2]),
+                                     1,0),
+             sin365 = sin(2*pi*day/365),
+             cos365 = cos(2*pi*day/365)
+             
+             )
+}
 
-# Convert to weekly observations
-sample_days <- seq(1, n_days, by = 7)
-weekly_states <- states[, seq(1, n_days, by = 7)]
-
-# Convert data to long format for model fitting
-simulation_data <- data.frame(
-  individual = rep(1:n_individuals, times = n_weeks),
-  week = rep(sample_days, each = n_individuals),
-  state = as.vector(weekly_states)
-) %>%
-  arrange(individual, week) %>%
-  group_by(individual) %>%
-  filter(!(state == lag(state, default = first(state)) & state==3  )) %>% #censor if R
-  ungroup()
-
-head(simulation_data)
-
-#head(simulation_data)
 
 
-####MARKOV MODEL 
+    ####MARKOV MODEL 
+    
+fit_data <- function(X){    
+    Q <- rbind(
+      c(0, 1, 0),  # From S: S->I
+      c(0, 0, 1 / mean_duration_infected),  # From I: I->R
+      c(0, 0, 0)  # From R: no transitions
+    )
+    
 
+    # Fit Markov transition model
+    model <- msm(state ~ day , 
+                 subject = individual,
+                 data = X,
+                 qmatrix = Q, 
+                 covariates = list("1-2" = ~ ward_epidemic + sin365 +cos365),
+                 gen.inits = TRUE)
+    
+    res <- hazard.msm(model)
+    estimate <- res$ward_epidemic['State 1 - State 2',]
+    
+    return(estimate)
+}
 
-Q <- rbind(
-  c(0, 1, 0),  # From S: S->I
-  c(0, 0, 1 / mean_duration_infected),  # From I: I->R
-  c(0, 0, 0)  # From R: no transitions
-)
+#Generate 500 simulations
+sims <- pbreplicate(500,gen_data(), simplify = F)
 
-# Fit Markov transition model
-model <- msm(state ~ week, subject = individual, data = simulation_data,
-             qmatrix = Q, gen.inits = TRUE)
+#extract results
+all_estimates <- t(pbsapply(sims,fit_data))
 
-# Summary of the model
-summary(model)
-
-# Extract transition probabilities
-pmatrix.msm(model)
-
+#Power
+mean(all_estimates[,'L']>1)
