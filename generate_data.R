@@ -1,3 +1,5 @@
+##This code generates data using a 2 state discrete-time Markov model
+
 library(lubridate)
 library(msm)
 library(tidyverse)
@@ -9,7 +11,7 @@ n_individuals <- 120 #40 people per ward, on 3 wards (must be a multiple of 3!)
 n_weeks <- 104 #2 year
 n_days <- n_weeks * 7
 p_infect_community_base <- 0.001  # Baseline community infection rate--yields ~23% of people getting infected using the seasonal parameters below
-ward_epidemic_multiplier <- 1.5
+ward_epidemic_multiplier <- 2
 ward_epidemics <- list(c(100,145),
                        c(500,545)) #when are there epidemics on the wward?
 
@@ -18,8 +20,7 @@ ward_epidemics <- list(c(100,145),
 # Seasonal variation in community infection rates (sinusoidal)
 community_infection_rate <- function(day, id) {
   if(
-     (day>ward_epidemics[[1]][1] & day<ward_epidemics[[1]][2])|(day>ward_epidemics[[2]][1] & day<ward_epidemics[[2]][2])|
-    ward_individual_mapping[id,2] ==2 & day>100 & day<130
+     (day>ward_epidemics[[1]][1] & day<ward_epidemics[[1]][2])|(day>ward_epidemics[[2]][1] & day<ward_epidemics[[2]][2])
     ){
     ward_epidemic_multiplier * p_infect_community_base * (1 + 0.5 * sin(2 * pi * (day / 365)))
   }else{
@@ -106,7 +107,7 @@ fit_data <- function(X){
                  gen.inits = TRUE)
     
     res <- hazard.msm(model)
-    estimate <- res$ward_epidemic['State 1 - State 2',]
+    estimate <- res
     
     return(estimate)
 }
@@ -115,7 +116,16 @@ fit_data <- function(X){
 sims <- pbreplicate(500,gen_data(), simplify = F)
 
 #extract results
-all_estimates <- t(pbsapply(sims,fit_data))
+all_estimates <- t(pblapply(sims,fit_data))
+
+covar_estimates <- t(sapply(all_estimates,function(x){
+     x$ward_epidemic["State 1 - State 2",]
+}))
+
+#mean of HR estimates across all
+mean(covar_estimates[,'HR'])
 
 #Power
-mean(all_estimates[,'L']>1)
+mean(covar_estimates[,'L']>1)
+
+mean(covar_estimates[,'L']<1.5 & covar_estimates[,'U']>1.5)
