@@ -12,17 +12,19 @@ nsim=500
 n_individuals <- 240 #40 people per ward, on 3 wards (must be a multiple of 3!), in 2 years (each year considered independent)
 n_weeks <- 52 #2 year (but just deal with 1 year of time because )
 n_days <- n_weeks * 7
-p_infect_community_base <- 0.00075  # Baseline community infection rate--yields ~23% of people getting infected using the seasonal parameters below
+p_infect_community_base <- 0.0012   #0.00075 yields 22.5% prevalenc; 0.0015 yields 41% prevalence
 ward_epidemic_multiplier <- 2
-ward_epidemics <- list(c(100,145),
-                       c(250,295)) #when are there epidemics on the wward?
+ward_epidemics <- list(c(100,160),
+                       c(250,310),
+                       c(310,310)) #when are there epidemics on the wward?
 
 #For influenza, assume 23% of HCW infected during season: https://pmc.ncbi.nlm.nih.gov/articles/PMC2352563/
 
 # Seasonal variation in community infection rates (sinusoidal)
 community_infection_rate <- function(day, id) {
   if(
-     (day>ward_epidemics[[1]][1] & day<ward_epidemics[[1]][2])|(day>ward_epidemics[[2]][1] & day<ward_epidemics[[2]][2])
+     (day>ward_epidemics[[1]][1] & day<ward_epidemics[[1]][2])|(day>ward_epidemics[[2]][1] & day<ward_epidemics[[2]][2])|
+     (day>ward_epidemics[[3]][1] & day<ward_epidemics[[3]][2])
     ){
     ward_epidemic_multiplier * p_infect_community_base * exp( 0.5 * sin(2 * pi * (day / 365)))
   }else{
